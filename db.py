@@ -10,17 +10,25 @@ def _is_pg(url):
 
 
 if _is_pg(DATABASE_URL):
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
-    _url = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    conn = psycopg2.connect(_url)
-    conn.autocommit = False
-    _raw = conn.cursor(cursor_factory=RealDictCursor)
+    import pg8000.dbapi as _pg
+    from urllib.parse import urlparse, unquote
+    _u = urlparse(DATABASE_URL)
+    conn = _pg.connect(
+        host=_u.hostname,
+        port=_u.port or 5432,
+        user=unquote(_u.username or ""),
+        password=unquote(_u.password or ""),
+        database=(_u.path or "/").lstrip("/") or "neondb",
+        ssl_context=True,
+    )
+    try:
+        conn.autocommit = False
+    except Exception:
+        pass
     BACKEND = "postgres"
 else:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    _raw = conn.cursor()
     BACKEND = "sqlite"
 
 print("[RCX] db backend:", BACKEND, flush=True)
@@ -82,8 +90,10 @@ _RETURNING_TABLES = ("into links", "into clicks", "into channels", "into payment
 
 
 class CompatCursor:
-    def __init__(self, raw):
-        self._raw = raw
+    def __init__(self, raw_conn):
+        # raw_conn is the DB connection. We build a cursor from it.
+        self._conn = raw_conn
+        self._cur = raw_conn.cursor()
         self._lastrowid = None
 
     def execute(self, sql, params=()):
@@ -93,19 +103,22 @@ class CompatCursor:
             low = t.lower()
             if "returning" not in low and any(tbl in low for tbl in _RETURNING_TABLES):
                 t = t.rstrip().rstrip(";") + " RETURNING id"
-                self._raw.execute(t, params)
+                self._cur.execute(t, params)
                 try:
-                    r = self._raw.fetchone()
-                    if r:
-                        self._lastrowid = r["id"] if isinstance(r, dict) else r[0]
+                    r = self._cur.fetchone()
+                    if r is not None:
+                        if isinstance(r, dict):
+                            self._lastrowid = r.get("id")
+                        else:
+                            self._lastrowid = r[0]
                 except Exception:
                     self._lastrowid = None
                 return self
-        self._raw.execute(t, params)
+        self._cur.execute(t, params)
         return self
 
     def executemany(self, sql, seq):
-        self._raw.executemany(_translate(sql), seq)
+        self._cur.executemany(_translate(sql), seq)
         return self
 
     def executescript(self, script):
@@ -113,28 +126,31 @@ class CompatCursor:
             for stmt in _translate_schema(script).split(";"):
                 s = stmt.strip()
                 if s:
-                    self._raw.execute(s)
+                    self._cur.execute(s)
         else:
-            self._raw.executescript(script)
+            self._cur.executescript(script)
         return self
 
     def fetchone(self):
-        r = self._raw.fetchone()
+        r = self._cur.fetchone()
         if r is None:
             return None
         if BACKEND == "sqlite":
             return r
-        return CompatRow(r)
+        cols = [d[0] for d in (self._cur.description or [])]
+        d = dict(zip(cols, r)) if cols else {}
+        return CompatRow(d)
 
     def fetchall(self):
-        rows = self._raw.fetchall()
+        rows = self._cur.fetchall()
         if BACKEND == "sqlite":
             return rows
-        return [CompatRow(r) for r in rows]
+        cols = [d[0] for d in (self._cur.description or [])]
+        return [CompatRow(dict(zip(cols, r))) if cols else CompatRow({}) for r in rows]
 
     @property
     def lastrowid(self):
         return self._lastrowid
 
 
-c = CompatCursor(_raw)
+c = CompatCursor(conn)
