@@ -1,0 +1,7 @@
+rehancodex.db
+bot.log
+*.pyc
+__pycache__/
+.rcx/
+fakeetc/
+.env
