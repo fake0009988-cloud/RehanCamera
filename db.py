@@ -83,6 +83,16 @@ def _translate_schema(sql):
     s = sql
     s = s.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
     s = s.replace("INTEGER PRIMARY KEY", "BIGINT PRIMARY KEY")
+    # Foreign-key-ish columns must be BIGINT — Telegram IDs exceed INT32 range
+    s = s.replace("user_id INTEGER", "user_id BIGINT")
+    s = s.replace("owner INTEGER", "owner BIGINT")
+    s = s.replace("link_id INTEGER", "link_id BIGINT")
+    s = s.replace("amount INTEGER", "amount BIGINT")
+    s = s.replace("credits INTEGER", "credits BIGINT")
+    s = s.replace("price INTEGER", "price BIGINT")
+    s = s.replace("hits INTEGER", "hits BIGINT")
+    s = s.replace("banned INTEGER", "banned BIGINT")
+    s = s.replace("active INTEGER", "active BIGINT")
     return s
 
 
