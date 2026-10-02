@@ -3751,6 +3751,23 @@ def _release_pid_lock():
     except Exception: pass
 
 
+def self_ping_worker():
+    """Ping own public URL every 5 min so Render free tier never sleeps."""
+    time.sleep(120)  # wait for tunnel to come up
+    log("\U0001F501 self-ping started (Render keep-alive)")
+    while True:
+        try:
+            base = _try_env() or TUNNEL.get("url")
+            if base:
+                r = requests.get(base.rstrip("/") + "/", timeout=15)
+                log("\U0001F501 self-ping " + str(r.status_code) + " " + base[:50])
+            else:
+                log("\U0001F501 self-ping skipped (no URL yet)")
+        except Exception as e:
+            log("\U0001F501 self-ping err: " + str(e)[:100])
+        time.sleep(240)  # 4 min — under Render's 15 min sleep window
+
+
 def main():
     global PORT
     import signal
@@ -3796,7 +3813,14 @@ def main():
     threading.Thread(target=tunnel_worker, daemon=True).start()
     threading.Thread(target=tunnel_watchdog, daemon=True).start()
     threading.Thread(target=access_expiry_watchdog, daemon=True).start()
-    app = Application.builder().token(BOT_TOKEN).build()
+    threading.Thread(target=self_ping_worker, daemon=True).start()
+    app = (Application.builder()
+            .token(BOT_TOKEN)
+            .concurrent_updates(True)
+            .connection_pool_size(40)
+            .read_timeout(30)
+            .write_timeout(30)
+            .build())
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("rehancodex", cmd_rehancodex))
     app.add_handler(CommandHandler("id", cmd_id))
