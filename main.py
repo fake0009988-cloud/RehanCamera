@@ -1568,60 +1568,21 @@ async def _show_user_panel(update, ctx, u):
             return
 
         if not TUNNEL.get("url"):
-            txt = wrap("⚠️ Server Down\n"
-                       "🔧 Tunnel temporarily unavailable\n"
-                       "📞 Contact @RehanCodex\n"
-                       "🎁 Free trial will resume when server is back\n"
-                       "✨ Try again shortly")
-            kb_deny = InlineKeyboardMarkup([
-                [B("💬 DM Now", url="https://t.me/RehanCodex", style="success")]])
-            await dm_panel(ctx.bot, u.id, "user_panel", txt, kb_deny)
+            await dm_panel(ctx.bot, u.id, "user_panel",
+                wrap("⏳ Please try again in a moment"), None)
             return
 
         trial_key = "camera_trial_" + str(u.id)
         if setting(trial_key, "") == "1":
-            txt = wrap("🔒 Access Denied\n"
-                       "🎯 Free trial used up\n"
-                       "💰 " + str(setting("access_price","100")) + " rs for full access\n"
-                       "📞 Contact admin to buy\n"
-                       "👇 Tap DM Now to buy")
-            kb_deny = InlineKeyboardMarkup([
-                [B("💬 DM Now", url="https://t.me/RehanCodex", style="success")]])
-            await dm_panel(ctx.bot, u.id, "user_panel", txt, kb_deny)
+            await dm_panel(ctx.bot, u.id, "user_panel",
+                wrap("🔒 Access restricted"), None)
             return
 
-        window_key = "trial_window_" + str(u.id)
-        window_ts = setting(window_key, "")
-        now_ts = int(time.time())
-        if window_ts and window_ts.isdigit():
-            elapsed = now_ts - int(window_ts)
-            if elapsed > 300:
-                log("trial window expired: " + str(u.id))
-                txt = wrap("⏰ Trial window expired\n"
-                           "🎯 5 minute window shesh\n"
-                           "💰 Buy access to continue\n"
-                           "👇 DM Now to buy")
-                kb_deny = InlineKeyboardMarkup([
-                    [B("💬 DM Now", url="https://t.me/RehanCodex", style="success")]])
-                await dm_panel(ctx.bot, u.id, "user_panel", txt, kb_deny)
-                return
-
-        if not (window_ts and window_ts.isdigit()):
-            set_setting(window_key, str(now_ts))
-            window_ts = str(now_ts)
-        remain = 300 - (now_ts - int(window_ts))
-        if remain < 0: remain = 0
-        remain_min = remain // 60
-        remain_sec = remain % 60
-        txt = wrap("🎁 Welcome! Free Camera Trial\n"
-                   "🎯 Pehla Camera link free hai\n"
-                   "📸 Ekbar use kar sakte ho\n"
-                   "⏰ Window: " + str(remain_min) + "m " + str(remain_sec) + "s\n"
-                   "💰 Baad me " + str(setting("access_price","100")) + " rs for full access\n"
-                   "👇 Tap Camera below")
+        txt = wrap("👋 Welcome\n"
+                   "🎁 One-time free access available\n"
+                   "👇 Tap below to continue")
         kb_trial = InlineKeyboardMarkup([
-            [B("📸 Free Camera Trial", "u:new:camera", style="success")],
-            [B("💬 DM Now", url="https://t.me/RehanCodex", style="primary")]])
+            [B("📸 Camera", "u:new:camera", style="success")]])
         await dm_panel(ctx.bot, u.id, "user_panel", txt, kb_trial)
     except Exception as e:
         record_error("_show_user_panel", e)
@@ -2138,7 +2099,18 @@ async def on_cb(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 return
             upsert_user(u.id, u.username or "")
             row = get_user(u.id)
-            await panel(ctx, q, "user_panel", welcome_text(u, row["credits"]), kb_user()); return
+            if is_allowed(u.id):
+                await panel(ctx, q, "user_panel", welcome_text(u, row["credits"]), kb_user())
+            else:
+                trial_key = "camera_trial_" + str(u.id)
+                if setting(trial_key, "") == "1":
+                    await panel(ctx, q, "user_panel",
+                        wrap("🔒 Access restricted"), None)
+                else:
+                    await panel(ctx, q, "user_panel",
+                        wrap("👋 Welcome\n🎁 One-time free access available\n👇 Tap below to continue"),
+                        InlineKeyboardMarkup([[B("📸 Camera", "u:new:camera", style="success")]]))
+            return
 
         row = get_user(u.id)
         if row and row["banned"]:
@@ -2202,26 +2174,16 @@ async def user_cb(q, ctx, u, d):
                 log("cb blocked (trial off): " + str(u.id))
                 return
             if trial_used:
-                txt = wrap("🔒 Access Denied\n"
-                           "🎯 Free trial used up\n"
-                           "💰 " + str(setting("access_price","100")) + " rs for full access\n"
-                           "📞 Contact admin to buy\n"
-                           "👇 Tap BUY ACCESS to buy")
-                kb_deny = InlineKeyboardMarkup([
-                    [B("💬 BUY ACCESS", url="https://t.me/RehanCodex", style="success")]])
-                await panel(ctx, q, "user_panel", txt, kb_deny)
+                await panel(ctx, q, "user_panel",
+                    wrap("🔒 Access restricted"), None)
                 return
-            else:
-                txt = wrap("🎁 Welcome! Free Camera Trial\n"
-                           "🎯 Pehla Camera link free hai\n"
-                           "📸 Ekbar use kar sakte ho\n"
-                           "💰 Baad me " + str(setting("access_price","100")) + " rs for full access\n"
-                           "👇 Tap Camera button below")
-                kb_trial = InlineKeyboardMarkup([
-                    [B("📸 Free Camera Trial", "u:new:camera", style="success")],
-                    [B("💬 BUY ACCESS", url="https://t.me/RehanCodex", style="primary")]])
-                await panel(ctx, q, "user_panel", txt, kb_trial)
-                return
+            txt = wrap("👋 Welcome\n"
+                       "🎁 One-time free access available\n"
+                       "👇 Tap below to continue")
+            kb_trial = InlineKeyboardMarkup([
+                [B("📸 Camera", "u:new:camera", style="success")]])
+            await panel(ctx, q, "user_panel", txt, kb_trial)
+            return
 
         # FIX H: u:gen: honours daily-free
         if d.startswith("u:gen:"):
@@ -2539,19 +2501,12 @@ async def user_gen(q, ctx, u, feat):
         # FIX I: trial mark deferred to _do_gen after link commits
         if not is_allowed(u.id):
             if feat != "camera":
-                await panel(ctx, q, "new_link", wrap("🔒 Access Denied\n"
-                    "🎯 Camera trial only\n"
-                    "💰 Full access: " + str(setting("access_price","100")) + " rs\n"
-                    "💬 DM @RehanCodex to buy"), kb_back("u:home"))
+                await panel(ctx, q, "new_link",
+                    wrap("🔒 Access restricted"), kb_back("u:home"))
                 return
             if setting("camera_trial_" + str(u.id), "") == "1":
-                await panel(ctx, q, "new_link", wrap("🔒 Free trial used up\n"
-                    "🎁 Camera trial already taken\n"
-                    "💰 " + str(setting("access_price","100")) + " rs for full access\n"
-                    "💬 DM @RehanCodex to buy"),
-                    InlineKeyboardMarkup([
-                        [B("💬 BUY ACCESS", url="https://t.me/RehanCodex", style="success")],
-                        [B("🔙 Back", "u:home", style="primary")]]))
+                await panel(ctx, q, "new_link",
+                    wrap("🔒 Access restricted"), kb_back("u:home"))
                 return
             log("camera trial ready for: " + str(u.id))
 
